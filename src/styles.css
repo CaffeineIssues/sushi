@@ -3043,3 +3043,13 @@ textarea {
     aspect-ratio: 1.15;
   }
 }
+
+button.logo {
+  padding-left: 0;
+  padding-right: 0;
+  padding-top: 0;
+}
+:root:fullscreen {
+  background: #fff;
+  overflow-y: auto;
+}

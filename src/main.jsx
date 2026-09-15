@@ -296,6 +296,20 @@ function App() {
     setToast(t);
     setTimeout(() => setToast(""), 2700);
   };
+  const enterFullscreen = async () => {
+    if (document.fullscreenElement || document.webkitFullscreenElement) return;
+    const root = document.documentElement;
+    const request = root.requestFullscreen || root.webkitRequestFullscreen;
+    if (!request) {
+      notify("Tela cheia indisponível neste navegador.");
+      return;
+    }
+    try {
+      await request.call(root);
+    } catch {
+      notify("Não foi possível ativar a tela cheia neste navegador.");
+    }
+  };
   const add = (p, q = 1, n = "") => {
     const old = cart.find((i) => i.id === p.id && i.note === n);
     updateCart(
@@ -366,11 +380,16 @@ function App() {
     <>
       <header className="header">
         <div className="header-inner">
-          <Link className="logo" to={pageLink("/")} aria-label="Nori início">
+          <button
+            className="logo"
+            onClick={enterFullscreen}
+            aria-label="Nori — ativar tela cheia"
+            title="Ativar tela cheia"
+          >
             <span className="logo-mark">の</span>nori
             <span className="logo-dot">.</span>
             <span className="logo-caption">SUSHI FEITO NA HORA</span>
-          </Link>
+          </button>
           <nav aria-label="Navegação do site">
             {[
               ["/", "Início"],
@@ -808,10 +827,15 @@ function App() {
         )}
       </main>
       <footer>
-        <Link className="logo" to={pageLink("/")}>
+        <button
+          className="logo"
+          onClick={enterFullscreen}
+          aria-label="Nori — ativar tela cheia"
+          title="Ativar tela cheia"
+        >
           <span className="logo-mark">の</span>nori
           <span className="logo-dot">.</span>
-        </Link>
+        </button>
         <p>Feito com carinho. Compartilhado com quem você ama.</p>
         <span>
           © {new Date().getFullYear()} Nori Sushi{" "}

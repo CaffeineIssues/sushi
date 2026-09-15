@@ -18,6 +18,10 @@ npm run dev
 
 Navegação por URLs próprias, com suporte a voltar/avançar e recarregar. Pedidos, favoritos, sacola e endereço ficam no armazenamento local. Dados de cartão não são persistidos.
 
+## Preview no celular
+
+Toque no logo Nori para ativar a tela cheia sem sair da página atual. A função depende do suporte do navegador à Fullscreen API; se indisponível, o aplicativo informa isso.
+
 ## QR code da mesa
 
 O QR code abre `/cardapio?mesa=<UID>`. O cliente pode escanear com a câmera do celular, selecionar **Presencial** no aplicativo ou selecionar uma foto do código. Não há campo para digitar mesa ou página para gerar códigos no aplicativo do cliente.
