@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { demoTables } from "../src/tables.js";
 test("delivery cart survives reload and completes a Pix demo", async ({
   page,
 }) => {
@@ -29,11 +30,17 @@ test("delivery cart survives reload and completes a Pix demo", async ({
   ).toBeVisible();
   await expect(page.locator(".order-receipt")).toContainText("95,80");
   await expect(page.locator(".bag-button b")).toHaveText("0");
+  await page.getByRole("button", { name: "Acompanhar pedido" }).click();
+  await expect(page).toHaveURL(/\/pedidos$/);
+  await expect(page.locator(".order-card")).toHaveCount(1);
+  await page.reload();
+  await expect(page.locator(".order-card")).toContainText("Combinado Nori");
+  await expect(page.locator(".order-card")).toContainText("95,80");
 });
 test("QR table link completes card demo without delivery fee", async ({
   page,
 }) => {
-  await page.goto("/?mesa=12");
+  await page.goto(`/cardapio?mesa=${demoTables[11].uid}`);
   await expect(page.locator(".location")).toContainText("Mesa 12");
   await page
     .getByRole("button", {
@@ -81,23 +88,38 @@ test("search, categories and cart removal work", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("mode is fixed by entry link and invalid table links use delivery", async ({
+test("presencial requires a valid QR and delivery can be selected", async ({
   page,
 }) => {
   await page.goto("/");
-  await expect(page.locator(".service-label")).toHaveText("Delivery");
+  await expect(
+    page.getByRole("button", { name: "Delivery", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await expect(
     page.getByRole("button", { name: "Na mesa", exact: true }),
   ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Pedir na mesa", exact: true }),
   ).toHaveCount(0);
-  await page.goto("/?mesa=07");
-  await expect(page.locator(".service-label")).toHaveText("Mesa 07");
+  await page.goto(`/cardapio?mesa=${demoTables[6].uid}`);
+  await expect(page.locator(".location")).toContainText("Mesa 07");
   await expect(page.locator(".location")).toBeDisabled();
+  await page.getByRole("button", { name: "Delivery", exact: true }).click();
+  await expect(page).toHaveURL("/cardapio");
+  await expect(page.locator(".location")).toBeEnabled();
+  await page.getByRole("button", { name: "Presencial", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button", { name: "Fechar", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Delivery", exact: true }),
-  ).toHaveCount(0);
-  await page.goto("/?mesa=abc");
-  await expect(page.locator(".service-label")).toHaveText("Delivery");
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.goto("/cardapio?mesa=abc");
+  await expect(
+    page.getByRole("heading", { name: "Este QR code não foi reconhecido." }),
+  ).toBeVisible();
+  await expect(page.locator(".product-card")).toHaveCount(0);
+  await page.goto("/cardapio?mesa=12");
+  await expect(
+    page.getByRole("heading", { name: "Este QR code não foi reconhecido." }),
+  ).toBeVisible();
 });

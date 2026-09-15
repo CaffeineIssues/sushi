@@ -29,7 +29,24 @@ import {
   Home,
   ReceiptText,
 } from "lucide-react";
+import {
+  BrowserRouter,
+  Link,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
+import { OrdersPage } from "./pages";
+import { QrScanner } from "./QrScanner";
+import { resolveTable } from "./tables";
 import "./styles.css";
+const readStored = (key, fallback) => {
+  try {
+    const value = JSON.parse(localStorage.getItem(key));
+    return Array.isArray(value) ? value : fallback;
+  } catch {
+    return fallback;
+  }
+};
 const money = (n) =>
   n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const photos = {
@@ -162,12 +179,36 @@ const categories = [
   ["Bebidas", "🥤"],
 ];
 function App() {
-  const query = new URLSearchParams(location.search);
+  const route = useLocation();
+  const navigate = useNavigate();
+  const page = route.pathname.replace(/\/$/, "") || "/";
+  const onlyFavorites = page === "/favoritos";
+  const pageLink = (path) => path + route.search;
+  const query = new URLSearchParams(route.search);
   const rawTable = query.get("mesa");
-  const table = /^(0?[1-9]|[1-9][0-9])$/.test(rawTable || "")
-    ? rawTable.padStart(2, "0")
-    : null;
-  const mode = table ? "table" : "delivery";
+  const tableRecord = resolveTable(rawTable);
+  const table = tableRecord?.number || null;
+  const invalidTable = query.has("mesa") && !tableRecord;
+  const mode = tableRecord ? "table" : "delivery";
+  const scanTable = (text) => {
+    let url;
+    try {
+      url = new URL(text);
+    } catch {
+      return "Este QR code não é um link de mesa da Nori.";
+    }
+    if (
+      url.origin !== window.location.origin ||
+      !["/", "/cardapio"].includes(url.pathname) ||
+      !resolveTable(url.searchParams.get("mesa"))
+    )
+      return "QR code não reconhecido. Escaneie o código da sua mesa na Nori.";
+    setModal(null);
+    navigate(
+      "/cardapio?mesa=" + encodeURIComponent(url.searchParams.get("mesa")),
+    );
+    return null;
+  };
   const [category, setCategory] = useState("Todos"),
     [search, setSearch] = useState(""),
     [cart, setCart] = useState(() => {
@@ -177,8 +218,10 @@ function App() {
         return [];
       }
     }),
-    [favorites, setFavorites] = useState([]),
-    [onlyFavorites, setOnlyFavorites] = useState(false),
+    [favorites, setFavorites] = useState(() =>
+      readStored("nori-favorites", []),
+    ),
+    [orders, setOrders] = useState(() => readStored("nori-orders", [])),
     [modal, setModal] = useState(null),
     [selected, setSelected] = useState(null),
     [qty, setQty] = useState(1),
@@ -194,6 +237,22 @@ function App() {
     [toast, setToast] = useState(""),
     [order, setOrder] = useState(null),
     [customer, setCustomer] = useState("");
+  useEffect(() => {
+    setModal(null);
+    setSearch("");
+    setCategory("Todos");
+    window.scrollTo(0, 0);
+    document.title =
+      ({
+        "/": "Início",
+        "/cardapio": "Cardápio",
+        "/pedidos": "Meus pedidos",
+        "/favoritos": "Meus favoritos",
+      }[page] || "Página não encontrada") + " · Nori Sushi";
+  }, [page]);
+  useEffect(() => {
+    localStorage.setItem("nori-favorites", JSON.stringify(favorites));
+  }, [favorites]);
   useEffect(() => {
     if (!modal) return;
     const previous = document.activeElement;
@@ -271,13 +330,26 @@ function App() {
     setModal("checkout");
   };
   const complete = () => {
-    setOrder({
-      id: String(Date.now()).slice(-5),
+    const nextOrder = {
+      id: String(Date.now()),
       total: subtotal + fee,
       mode,
       table,
+      tableUid: tableRecord?.uid || null,
       payment,
-    });
+      items: cart.map((i) => ({
+        name: i.name,
+        qty: i.qty,
+        price: i.price,
+        image: i.image,
+        note: i.note,
+      })),
+      createdAt: new Date().toISOString(),
+    };
+    setOrder(nextOrder);
+    const nextOrders = [nextOrder, ...orders];
+    setOrders(nextOrders);
+    localStorage.setItem("nori-orders", JSON.stringify(nextOrders));
     setPaid(true);
     updateCart([]);
   };
@@ -294,32 +366,37 @@ function App() {
     <>
       <header className="header">
         <div className="header-inner">
-          <a className="logo" href="#" aria-label="Nori início">
+          <Link className="logo" to={pageLink("/")} aria-label="Nori início">
             <span className="logo-mark">の</span>nori
             <span className="logo-dot">.</span>
             <span className="logo-caption">SUSHI FEITO NA HORA</span>
-          </a>
-          <nav>
-            <a href="#cardapio" className="active">
-              Cardápio
-            </a>
-            <button
-              onClick={() => {
-                setOnlyFavorites(!onlyFavorites);
-                document
-                  .getElementById("cardapio")
-                  .scrollIntoView({ behavior: "smooth" });
-              }}
-            >
-              Meus favoritos <Heart size={14} />
-            </button>
-            <button onClick={() => setModal("about")}>Sobre a Nori</button>
+          </Link>
+          <nav aria-label="Navegação do site">
+            {[
+              ["/", "Início"],
+              ["/cardapio", "Cardápio"],
+              ["/pedidos", "Pedidos"],
+              ["/favoritos", "Favoritos"],
+            ].map(([path, label]) => (
+              <Link
+                key={path}
+                to={pageLink(path)}
+                className={page === path ? "active" : ""}
+                aria-current={page === path ? "page" : undefined}
+              >
+                {label}
+              </Link>
+            ))}
           </nav>
           <div className="header-actions">
             <span className="open-status">
               <i /> Aberto agora
             </span>
-            <button className="bag-button" onClick={() => setModal("cart")}>
+            <button
+              className="bag-button"
+              onClick={() => setModal("cart")}
+              disabled={invalidTable}
+            >
               <ShoppingBag size={19} />
               <span>Minha sacola</span>
               <b>{count}</b>
@@ -329,13 +406,36 @@ function App() {
       </header>
       <main>
         <div className="service-bar">
-          <div className="service-label">
-            {mode === "delivery" ? <Bike size={19} /> : <Utensils size={19} />}
-            <span>{mode === "delivery" ? "Delivery" : `Mesa ${table}`}</span>
+          <div
+            className="mode-switch"
+            role="group"
+            aria-label="Modalidade do pedido"
+          >
+            <button
+              className={mode === "delivery" && !invalidTable ? "selected" : ""}
+              aria-pressed={mode === "delivery" && !invalidTable}
+              onClick={() => {
+                const params = new URLSearchParams(route.search);
+                params.delete("mesa");
+                setModal(null);
+                navigate(page + (params.size ? "?" + params.toString() : ""));
+              }}
+            >
+              <Bike size={19} /> Delivery
+            </button>
+            <button
+              className={mode === "table" ? "selected" : ""}
+              aria-pressed={mode === "table"}
+              onClick={() => {
+                if (mode !== "table") setModal("scan");
+              }}
+            >
+              <Utensils size={17} /> Presencial
+            </button>
           </div>
           <button
             className="location"
-            disabled={mode === "table"}
+            disabled={mode === "table" || invalidTable}
             onClick={() => setModal("address")}
           >
             <MapPin size={18} />
@@ -363,288 +463,355 @@ function App() {
               : "Preparado na hora"}
           </span>
         </div>
-        <section className="hero">
-          <div className="app-promo">
-            <span>SEU FAVORITO, FEITO NA HORA</span>
-            <h2>
-              Uma pausa.
-              <br />
-              Muito sushi.
-            </h2>
+        {invalidTable && (
+          <section className="empty invalid-table">
+            <QrCode size={40} />
+            <h2>Este QR code não foi reconhecido.</h2>
             <p>
-              Seu combinado favorito a partir de <b>R$ 89,90</b>
+              Escaneie novamente o código da sua mesa ou continue com um pedido
+              para entrega.
             </p>
-            <button onClick={() => openProduct(products[0])}>
-              Quero experimentar <ArrowRight size={15} />
+            <button className="primary" onClick={() => setModal("scan")}>
+              Ler QR code
             </button>
-            <img src={photos.combo} alt="Combinado de sushi da casa" />
-          </div>
-          <div className="hero-copy">
-            <div className="eyebrow">
-              <span />
-              FEITO NA HORA. FEITO COM ALMA.
-            </div>
-            <h1>
-              Seu momento
-              <br />
-              pede <span>sushi.</span>
-              <svg viewBox="0 0 225 15" aria-hidden="true">
-                <path d="M5 10Q105 -4 218 7M30 14Q120 2 198 11" />
-              </svg>
-            </h1>
-            <p>
-              Ingredientes frescos, combinações que surpreendem
-              <br className="desktop" /> e aquele sabor que faz você querer
-              mais.
-            </p>
-            <a className="primary hero-cta" href="#cardapio">
-              Explorar cardápio <ArrowRight size={18} />
-            </a>
-            <div className="hero-proof">
-              <div className="avatar-stack">
-                <img src="https://i.pravatar.cc/60?img=47" alt="" />
-                <img src="https://i.pravatar.cc/60?img=12" alt="" />
-                <img src="https://i.pravatar.cc/60?img=44" alt="" />
+            <button
+              className="back-button"
+              onClick={() => navigate("/cardapio")}
+            >
+              Pedir delivery
+            </button>
+          </section>
+        )}
+        {!invalidTable && page === "/" && (
+          <>
+            <section className="hero">
+              <div className="app-promo">
+                <span>SEU FAVORITO, FEITO NA HORA</span>
+                <h2>
+                  Uma pausa.
+                  <br />
+                  Muito sushi.
+                </h2>
+                <p>
+                  Seu combinado favorito a partir de <b>R$ 89,90</b>
+                </p>
+                <button onClick={() => openProduct(products[0])}>
+                  Quero experimentar <ArrowRight size={15} />
+                </button>
+                <img src={photos.combo} alt="Combinado de sushi da casa" />
               </div>
-              <div>
-                <span className="stars">★★★★★</span>
-                <span>
-                  <strong>4,9</strong> · Mais de 1.200 momentos felizes
+              <div className="hero-copy">
+                <div className="eyebrow">
+                  <span />
+                  FEITO NA HORA. FEITO COM ALMA.
+                </div>
+                <h1>
+                  Seu momento
+                  <br />
+                  pede <span>sushi.</span>
+                  <svg viewBox="0 0 225 15" aria-hidden="true">
+                    <path d="M5 10Q105 -4 218 7M30 14Q120 2 198 11" />
+                  </svg>
+                </h1>
+                <p>
+                  Ingredientes frescos, combinações que surpreendem
+                  <br className="desktop" /> e aquele sabor que faz você querer
+                  mais.
+                </p>
+                <Link className="primary hero-cta" to={pageLink("/cardapio")}>
+                  Explorar cardápio <ArrowRight size={18} />
+                </Link>
+                <div className="hero-proof">
+                  <div className="avatar-stack">
+                    <img src="https://i.pravatar.cc/60?img=47" alt="" />
+                    <img src="https://i.pravatar.cc/60?img=12" alt="" />
+                    <img src="https://i.pravatar.cc/60?img=44" alt="" />
+                  </div>
+                  <div>
+                    <span className="stars">★★★★★</span>
+                    <span>
+                      <strong>4,9</strong> · Mais de 1.200 momentos felizes
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="hero-visual">
+                <img
+                  className="hero-food"
+                  src={photos.combo}
+                  alt="Seleção de sushis de salmão com arroz e ingredientes frescos"
+                />
+                <div className="hero-image-shade" />
+                <span className="vertical-japanese" aria-hidden="true">
+                  新鮮でおいしい
                 </span>
+                <div className="fresh-stamp">
+                  <Leaf size={22} />
+                  <span>
+                    SEMPRE
+                    <br />
+                    <strong>fresquinho</strong>
+                  </span>
+                </div>
+                <div className="hero-product">
+                  <div>
+                    <span>SEU NOVO FAVORITO</span>
+                    <h3>Combinado Nori</h3>
+                    <p>32 peças de pura felicidade</p>
+                  </div>
+                  <button
+                    onClick={() => openProduct(products[0])}
+                    aria-label="Ver Combinado Nori"
+                  >
+                    <ArrowUpRight size={25} />
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>
-          <div className="hero-visual">
-            <img
-              className="hero-food"
-              src={photos.combo}
-              alt="Seleção de sushis de salmão com arroz e ingredientes frescos"
-            />
-            <div className="hero-image-shade" />
-            <span className="vertical-japanese" aria-hidden="true">
-              新鮮でおいしい
-            </span>
-            <div className="fresh-stamp">
-              <Leaf size={22} />
+            </section>
+            <div className="benefits">
               <span>
-                SEMPRE
-                <br />
-                <strong>fresquinho</strong>
+                <Leaf />
+                Ingredientes selecionados
+              </span>
+              <span>
+                <Utensils />
+                Feito na hora, com carinho
+              </span>
+              <span>
+                <ShieldCheck />
+                Pagamento seguro
+              </span>
+              <span>
+                <Heart />
+                Sabor que aproxima
               </span>
             </div>
-            <div className="hero-product">
+          </>
+        )}
+        {!invalidTable && ["/", "/cardapio", "/favoritos"].includes(page) && (
+          <section
+            id="cardapio"
+            className={
+              "menu-section " + (page !== "/" ? "standalone-menu" : "")
+            }
+          >
+            <div className="section-heading">
               <div>
-                <span>SEU NOVO FAVORITO</span>
-                <h3>Combinado Nori</h3>
-                <p>32 peças de pura felicidade</p>
+                <div className="eyebrow coral">
+                  ESCOLHA O SEU PRÓXIMO FAVORITO
+                </div>
+                <h2>
+                  {onlyFavorites ? (
+                    "Meus favoritos"
+                  ) : page === "/cardapio" ? (
+                    "Cardápio"
+                  ) : (
+                    <>
+                      Um match com a sua fome<span>.</span>
+                    </>
+                  )}
+                </h2>
+                {page !== "/" && (
+                  <p className="page-description">
+                    {onlyFavorites
+                      ? "Os sabores que você ama, guardados em um só lugar."
+                      : "Escolha seus favoritos. A gente prepara cada peça na hora."}
+                  </p>
+                )}
+              </div>
+              <label className="search">
+                <Search size={19} />
+                <input
+                  placeholder="O que você está com vontade?"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch("")}
+                    aria-label="Limpar busca"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </label>
+            </div>
+            <div className="category-row">
+              <div className="categories">
+                {categories.map(([name, emoji]) => (
+                  <button
+                    key={name}
+                    className={category === name ? "current" : ""}
+                    onClick={() => setCategory(name)}
+                  >
+                    <span>{emoji}</span>
+                    {name}
+                  </button>
+                ))}
               </div>
               <button
-                onClick={() => openProduct(products[0])}
-                aria-label="Ver Combinado Nori"
+                className={"filter-button " + (sort ? "enabled" : "")}
+                onClick={() => setSort(!sort)}
+                title="Ordenar por menor preço"
               >
-                <ArrowUpRight size={25} />
+                <SlidersHorizontal size={18} />
+                <span>{sort ? "Menor preço" : "Filtros"}</span>
               </button>
             </div>
-          </div>
-        </section>
-        <div className="benefits">
-          <span>
-            <Leaf />
-            Ingredientes selecionados
-          </span>
-          <span>
-            <Utensils />
-            Feito na hora, com carinho
-          </span>
-          <span>
-            <ShieldCheck />
-            Pagamento seguro
-          </span>
-          <span>
-            <Heart />
-            Sabor que aproxima
-          </span>
-        </div>
-        <section id="cardapio" className="menu-section">
-          <div className="section-heading">
-            <div>
-              <div className="eyebrow coral">
-                ESCOLHA O SEU PRÓXIMO FAVORITO
-              </div>
-              <h2>
-                Um match com a sua fome<span>.</span>
-              </h2>
-            </div>
-            <label className="search">
-              <Search size={19} />
-              <input
-                placeholder="O que você está com vontade?"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              {search && (
-                <button onClick={() => setSearch("")} aria-label="Limpar busca">
-                  <X size={16} />
-                </button>
-              )}
-            </label>
-          </div>
-          <div className="category-row">
-            <div className="categories">
-              {categories.map(([name, emoji]) => (
-                <button
-                  key={name}
-                  className={category === name ? "current" : ""}
-                  onClick={() => setCategory(name)}
-                >
-                  <span>{emoji}</span>
-                  {name}
-                </button>
-              ))}
-            </div>
-            <button
-              className={"filter-button " + (sort ? "enabled" : "")}
-              onClick={() => setSort(!sort)}
-              title="Ordenar por menor preço"
-            >
-              <SlidersHorizontal size={18} />
-              <span>{sort ? "Menor preço" : "Filtros"}</span>
-            </button>
-          </div>
-          <div className="menu-label">
-            <h3>
-              {onlyFavorites
-                ? "Seus favoritos"
-                : category === "Todos"
-                  ? "Os queridinhos da casa"
-                  : category}{" "}
-              {!onlyFavorites && category === "Todos" && <Flame size={20} />}
-            </h3>
-            <span>
-              {filtered.length} opções para você{" "}
-              {onlyFavorites && (
-                <button onClick={() => setOnlyFavorites(false)}>
-                  Ver todos
-                </button>
-              )}
-            </span>
-          </div>
-          <div className="product-grid">
-            {filtered.map((p) => (
-              <article className="product-card" key={p.id}>
-                <div className="product-image" onClick={() => openProduct(p)}>
-                  <img src={p.image} alt={p.name} loading="lazy" />
-                  {p.badge && (
-                    <span
-                      className={
-                        "product-badge " +
-                        (p.badge === "Vegetariano" ? "green" : "")
-                      }
-                    >
-                      {p.badge === "Vegetariano" ? (
-                        <Leaf size={12} />
-                      ) : (
-                        <Flame size={12} />
-                      )}{" "}
-                      {p.badge}
-                    </span>
-                  )}
-                  <button
-                    className={
-                      "favorite " + (favorites.includes(p.id) ? "liked" : "")
-                    }
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      favorite(p.id);
-                    }}
-                    aria-label={`${favorites.includes(p.id) ? "Remover" : "Adicionar"} ${p.name} ${favorites.includes(p.id) ? "dos" : "aos"} favoritos`}
-                  >
-                    <Heart
-                      size={18}
-                      fill={favorites.includes(p.id) ? "currentColor" : "none"}
-                    />
-                  </button>
-                </div>
-                <div className="product-info">
-                  <div className="product-meta">
-                    <span>{p.pieces}</span>
-                    <span>
-                      <Star size={12} fill="currentColor" />
-                      {p.rating}
-                    </span>
-                  </div>
-                  <button
-                    className="product-title"
-                    onClick={() => openProduct(p)}
-                  >
-                    {p.name}
-                  </button>
-                  <p>{p.description}</p>
-                  <div className="product-bottom">
-                    <div>
-                      {p.old && <del>{money(p.old)}</del>}
-                      <strong>{money(p.price)}</strong>
-                    </div>
-                    <button
-                      className="add-button"
-                      aria-label={`Adicionar ${p.name}`}
-                      onClick={() => add(p)}
-                    >
-                      <Plus size={20} />
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-          {!filtered.length && (
-            <div className="empty">
-              <Search size={32} />
+            <div className="menu-label">
               <h3>
                 {onlyFavorites
-                  ? "Seus favoritos moram aqui"
-                  : "Nenhum prato encontrado"}
+                  ? "Seus favoritos"
+                  : category === "Todos"
+                    ? "Os queridinhos da casa"
+                    : category}{" "}
+                {!onlyFavorites && category === "Todos" && <Flame size={20} />}
               </h3>
-              <p>
-                {onlyFavorites
-                  ? "Toque no coração dos pratos que você ama."
-                  : "Tente outro nome ou escolha outra categoria."}
-              </p>
-              <button
-                className="primary"
-                onClick={() => {
-                  setOnlyFavorites(false);
-                  setSearch("");
-                  setCategory("Todos");
-                }}
-              >
-                Explorar cardápio
-              </button>
+              <span>
+                {filtered.length} opções para você{" "}
+                {onlyFavorites && (
+                  <Link to={pageLink("/cardapio")}>Ver cardápio completo</Link>
+                )}
+              </span>
             </div>
-          )}
-        </section>
-        <section className="table-banner">
-          <div className="banner-icon">
-            <QrCode size={30} />
-          </div>
-          <div>
-            <span>JÁ ESTÁ POR AQUI?</span>
-            <h3>Sua mesa. Seu tempo. Seu sushi.</h3>
-            <p>
-              Escaneie o QR code da mesa, escolha seus favoritos e pague pelo
-              app.
-            </p>
-          </div>
-          <span className="banner-japanese" aria-hidden="true">
-            寿司
-          </span>
-        </section>
+            <div className="product-grid">
+              {filtered.map((p) => (
+                <article className="product-card" key={p.id}>
+                  <div className="product-image" onClick={() => openProduct(p)}>
+                    <img src={p.image} alt={p.name} loading="lazy" />
+                    {p.badge && (
+                      <span
+                        className={
+                          "product-badge " +
+                          (p.badge === "Vegetariano" ? "green" : "")
+                        }
+                      >
+                        {p.badge === "Vegetariano" ? (
+                          <Leaf size={12} />
+                        ) : (
+                          <Flame size={12} />
+                        )}{" "}
+                        {p.badge}
+                      </span>
+                    )}
+                    <button
+                      className={
+                        "favorite " + (favorites.includes(p.id) ? "liked" : "")
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        favorite(p.id);
+                      }}
+                      aria-label={`${favorites.includes(p.id) ? "Remover" : "Adicionar"} ${p.name} ${favorites.includes(p.id) ? "dos" : "aos"} favoritos`}
+                    >
+                      <Heart
+                        size={18}
+                        fill={
+                          favorites.includes(p.id) ? "currentColor" : "none"
+                        }
+                      />
+                    </button>
+                  </div>
+                  <div className="product-info">
+                    <div className="product-meta">
+                      <span>{p.pieces}</span>
+                      <span>
+                        <Star size={12} fill="currentColor" />
+                        {p.rating}
+                      </span>
+                    </div>
+                    <button
+                      className="product-title"
+                      onClick={() => openProduct(p)}
+                    >
+                      {p.name}
+                    </button>
+                    <p>{p.description}</p>
+                    <div className="product-bottom">
+                      <div>
+                        {p.old && <del>{money(p.old)}</del>}
+                        <strong>{money(p.price)}</strong>
+                      </div>
+                      <button
+                        className="add-button"
+                        aria-label={`Adicionar ${p.name}`}
+                        onClick={() => add(p)}
+                      >
+                        <Plus size={20} />
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+            {!filtered.length && (
+              <div className="empty">
+                <Search size={32} />
+                <h3>
+                  {onlyFavorites
+                    ? "Seus favoritos moram aqui"
+                    : "Nenhum prato encontrado"}
+                </h3>
+                <p>
+                  {onlyFavorites
+                    ? "Toque no coração dos pratos que você ama."
+                    : "Tente outro nome ou escolha outra categoria."}
+                </p>
+                <button
+                  className="primary"
+                  onClick={() => {
+                    if (onlyFavorites) navigate(pageLink("/cardapio"));
+                    setSearch("");
+                    setCategory("Todos");
+                  }}
+                >
+                  Explorar cardápio
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+        {page === "/pedidos" && (
+          <OrdersPage orders={orders} menuLink={pageLink("/cardapio")} />
+        )}
+        {!["/", "/cardapio", "/pedidos", "/favoritos"].includes(page) && (
+          <section className="empty">
+            <h1>Página não encontrada</h1>
+            <Link className="primary" to={pageLink("/")}>
+              Voltar ao início
+            </Link>
+          </section>
+        )}
+        {page === "/" && (
+          <section className="table-banner">
+            <div className="banner-icon">
+              <QrCode size={30} />
+            </div>
+            <div>
+              <span>JÁ ESTÁ POR AQUI?</span>
+              <h3>Sua mesa. Seu tempo. Seu sushi.</h3>
+              <p>
+                Escaneie o QR code da mesa, escolha seus favoritos e pague pelo
+                app.
+              </p>
+            </div>
+            {mode === "delivery" && (
+              <button className="qr-page-link" onClick={() => setModal("scan")}>
+                <QrCode size={17} /> Ler QR code da mesa{" "}
+                <ArrowRight size={16} />
+              </button>
+            )}
+            <span className="banner-japanese" aria-hidden="true">
+              寿司
+            </span>
+          </section>
+        )}
       </main>
       <footer>
-        <a className="logo" href="#">
+        <Link className="logo" to={pageLink("/")}>
           <span className="logo-mark">の</span>nori
           <span className="logo-dot">.</span>
-        </a>
+        </Link>
         <p>Feito com carinho. Compartilhado com quem você ama.</p>
         <span>
           © {new Date().getFullYear()} Nori Sushi{" "}
@@ -652,50 +819,23 @@ function App() {
         </span>
       </footer>
       <nav className="bottom-nav" aria-label="Navegação principal">
-        <button
-          className={!modal && !onlyFavorites ? "active" : ""}
-          onClick={() => {
-            setModal(null);
-            setOnlyFavorites(false);
-            window.scrollTo({ top: 0, behavior: "smooth" });
-          }}
-        >
-          <Home size={20} />
-          <span>Início</span>
-        </button>
-        <button
-          onClick={() => {
-            setModal(null);
-            setOnlyFavorites(false);
-            document
-              .getElementById("cardapio")
-              .scrollIntoView({ behavior: "smooth" });
-          }}
-        >
-          <Utensils size={20} />
-          <span>Cardápio</span>
-        </button>
-        <button
-          className={modal === "orders" ? "active" : ""}
-          onClick={() => setModal("orders")}
-        >
-          <ReceiptText size={20} />
-          <span>Pedidos</span>
-          {order && <i />}
-        </button>
-        <button
-          className={onlyFavorites ? "active" : ""}
-          onClick={() => {
-            setModal(null);
-            setOnlyFavorites(true);
-            document
-              .getElementById("cardapio")
-              .scrollIntoView({ behavior: "smooth" });
-          }}
-        >
-          <Heart size={20} />
-          <span>Favoritos</span>
-        </button>
+        {[
+          ["/", "Início", Home],
+          ["/cardapio", "Cardápio", Utensils],
+          ["/pedidos", "Pedidos", ReceiptText],
+          ["/favoritos", "Favoritos", Heart],
+        ].map(([path, label, Icon]) => (
+          <Link
+            key={path}
+            to={pageLink(path)}
+            className={page === path ? "active" : ""}
+            aria-current={page === path ? "page" : undefined}
+          >
+            <Icon size={20} />
+            <span>{label}</span>
+            {path === "/pedidos" && orders.length > 0 && <i />}
+          </Link>
+        ))}
       </nav>
       {count > 0 && (
         <button
@@ -741,77 +881,7 @@ function App() {
             >
               <X size={21} />
             </button>
-            {modal === "orders" && (
-              <div className="modal-padding">
-                <span className="eyebrow coral">ACOMPANHE POR AQUI</span>
-                <h2>Meus pedidos</h2>
-                {order ? (
-                  <>
-                    <div className="order-receipt">
-                      <div>
-                        <span>Pedido #{order.id}</span>
-                        <strong>{money(order.total)}</strong>
-                      </div>
-                      <div>
-                        <span>
-                          {order.mode === "table"
-                            ? `Mesa ${order.table}`
-                            : "Delivery"}
-                        </span>
-                        <strong>Pagamento confirmado</strong>
-                      </div>
-                    </div>
-                    <div className="order-progress">
-                      <div>
-                        <CheckCheck size={20} />
-                        <span>
-                          <strong>Pedido recebido</strong>
-                          <small>Pagamento simulado aprovado</small>
-                        </span>
-                      </div>
-                      <div>
-                        <Utensils size={20} />
-                        <span>
-                          <strong>Na cozinha</strong>
-                          <small>Seu sushi está sendo preparado</small>
-                        </span>
-                      </div>
-                      <div>
-                        <Clock3 size={20} />
-                        <span>
-                          <strong>
-                            {order.mode === "table"
-                              ? "Já chega à sua mesa"
-                              : "Em breve, a caminho"}
-                          </strong>
-                          <small>
-                            {order.mode === "table"
-                              ? "Previsão de 20–30 minutos"
-                              : "Previsão de 35–50 minutos"}
-                          </small>
-                        </span>
-                      </div>
-                    </div>
-                    <p className="demo-notice">
-                      Acompanhamento ilustrativo do último pedido desta sessão.
-                      Nenhum pedido real foi enviado.
-                    </p>
-                  </>
-                ) : (
-                  <div className="empty">
-                    <ReceiptText size={40} />
-                    <h3>Seu próximo momento começa aqui.</h3>
-                    <p>
-                      Depois de finalizar seu pedido, acompanhe os detalhes por
-                      aqui.
-                    </p>
-                    <button className="primary" onClick={() => setModal(null)}>
-                      Explorar cardápio <ArrowRight size={16} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+            {modal === "scan" && <QrScanner onDetect={scanTable} />}
             {modal === "product" && (
               <>
                 <img
@@ -1064,9 +1134,12 @@ function App() {
                     </p>
                     <button
                       className="primary full"
-                      onClick={() => setModal(null)}
+                      onClick={() => {
+                        setModal(null);
+                        navigate(pageLink("/pedidos"));
+                      }}
                     >
-                      Voltar ao cardápio <ArrowRight size={18} />
+                      Acompanhar pedido <ArrowRight size={18} />
                     </button>
                   </div>
                 ) : (
@@ -1271,4 +1344,8 @@ function App() {
     </>
   );
 }
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(
+  <BrowserRouter>
+    <App />
+  </BrowserRouter>,
+);
