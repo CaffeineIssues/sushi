@@ -18,10 +18,6 @@ npm run dev
 
 Navegação por URLs próprias, com suporte a voltar/avançar e recarregar. Pedidos, favoritos, sacola e endereço ficam no armazenamento local. Dados de cartão não são persistidos.
 
-## Preview no celular
-
-Toque no logo Nori para ativar a tela cheia sem sair da página atual. A função depende do suporte do navegador à Fullscreen API; se indisponível, o aplicativo informa isso.
-
 ## QR code da mesa
 
 O QR code abre `/cardapio?mesa=<UID>`. O cliente pode escanear com a câmera do celular, selecionar **Presencial** no aplicativo ou selecionar uma foto do código. Não há campo para digitar mesa ou página para gerar códigos no aplicativo do cliente.
@@ -35,6 +31,12 @@ A câmera exige HTTPS (ou localhost). Em outro celular, use o domínio publicado
 ## Pagamento demonstrativo
 
 Pix ilustrativo, sem valor pagável. Para cartão, use dados fictícios como `4242 4242 4242 4242`, validade `12/30`, CVV `123`. Nenhuma cobrança ou pedido real é enviado. Status, avaliações, preços, taxas e tempos são ilustrativos.
+
+## Entrega simulada
+
+Após o pagamento, clique em **Acompanhar pedido**. A página Pedidos avança automaticamente: confirmado, em preparo, saiu para entrega e entregue. Delivery leva 40 segundos; pedidos presenciais levam 30 segundos até serem servidos na mesa. O botão **Avançar simulação** permite pular para a próxima etapa.
+
+A rota e o entregador são ilustrativos. O progresso usa o horário salvo no pedido e continua ao navegar ou recarregar. O endereço fica registrado no pedido, independentemente de alterações posteriores.
 
 ## Publicar na Vercel
 

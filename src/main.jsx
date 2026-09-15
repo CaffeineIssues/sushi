@@ -36,6 +36,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { OrdersPage } from "./pages";
+import { getDeliveryProgress } from "./delivery";
 import { QrScanner } from "./QrScanner";
 import { resolveTable } from "./tables";
 import "./styles.css";
@@ -296,20 +297,6 @@ function App() {
     setToast(t);
     setTimeout(() => setToast(""), 2700);
   };
-  const enterFullscreen = async () => {
-    if (document.fullscreenElement || document.webkitFullscreenElement) return;
-    const root = document.documentElement;
-    const request = root.requestFullscreen || root.webkitRequestFullscreen;
-    if (!request) {
-      notify("Tela cheia indisponível neste navegador.");
-      return;
-    }
-    try {
-      await request.call(root);
-    } catch {
-      notify("Não foi possível ativar a tela cheia neste navegador.");
-    }
-  };
   const add = (p, q = 1, n = "") => {
     const old = cart.find((i) => i.id === p.id && i.note === n);
     updateCart(
@@ -359,6 +346,8 @@ function App() {
         note: i.note,
       })),
       createdAt: new Date().toISOString(),
+      simulationStartedAt: Date.now(),
+      address: mode === "delivery" ? address : null,
     };
     setOrder(nextOrder);
     const nextOrders = [nextOrder, ...orders];
@@ -366,6 +355,21 @@ function App() {
     localStorage.setItem("nori-orders", JSON.stringify(nextOrders));
     setPaid(true);
     updateCart([]);
+  };
+  const advanceDelivery = (id, now = Date.now()) => {
+    setOrders((previous) => {
+      const next = previous.map((item) => {
+        if (item.id !== id) return item;
+        const progress = getDeliveryProgress(item, now);
+        if (progress.complete) return item;
+        return {
+          ...item,
+          simulationStartedAt: now - progress.steps[progress.index + 1].at,
+        };
+      });
+      localStorage.setItem("nori-orders", JSON.stringify(next));
+      return next;
+    });
   };
   let filtered = products.filter(
     (p) =>
@@ -380,16 +384,11 @@ function App() {
     <>
       <header className="header">
         <div className="header-inner">
-          <button
-            className="logo"
-            onClick={enterFullscreen}
-            aria-label="Nori — ativar tela cheia"
-            title="Ativar tela cheia"
-          >
+          <Link className="logo" to={pageLink("/")} aria-label="Nori — início">
             <span className="logo-mark">の</span>nori
             <span className="logo-dot">.</span>
             <span className="logo-caption">SUSHI FEITO NA HORA</span>
-          </button>
+          </Link>
           <nav aria-label="Navegação do site">
             {[
               ["/", "Início"],
@@ -791,7 +790,11 @@ function App() {
           </section>
         )}
         {page === "/pedidos" && (
-          <OrdersPage orders={orders} menuLink={pageLink("/cardapio")} />
+          <OrdersPage
+            orders={orders}
+            menuLink={pageLink("/cardapio")}
+            onAdvance={advanceDelivery}
+          />
         )}
         {!["/", "/cardapio", "/pedidos", "/favoritos"].includes(page) && (
           <section className="empty">
@@ -827,15 +830,10 @@ function App() {
         )}
       </main>
       <footer>
-        <button
-          className="logo"
-          onClick={enterFullscreen}
-          aria-label="Nori — ativar tela cheia"
-          title="Ativar tela cheia"
-        >
+        <Link className="logo" to={pageLink("/")} aria-label="Nori — início">
           <span className="logo-mark">の</span>nori
           <span className="logo-dot">.</span>
-        </button>
+        </Link>
         <p>Feito com carinho. Compartilhado com quem você ama.</p>
         <span>
           © {new Date().getFullYear()} Nori Sushi{" "}
@@ -1153,8 +1151,9 @@ function App() {
                       </div>
                     </div>
                     <p className="demo-notice">
-                      Pedido demonstrativo. Nenhuma cobrança ou entrega real foi
-                      realizada.
+                      Acompanhe a simulação em até{" "}
+                      {order.mode === "table" ? "30" : "40"} segundos. Nenhuma
+                      cobrança ou entrega real será realizada.
                     </p>
                     <button
                       className="primary full"
